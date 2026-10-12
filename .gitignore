@@ -3,3 +3,4 @@ config/install.conf
 config/sites.json
 .env
 *.local
+node_modules/

@@ -50,6 +50,17 @@ cp -R "$HERE/skill/autopost-article" "$DEST"
 sed -e "s|__NODE__|$NODE|" -e "s|__HERMES_HOME__|$HERMES_HOME|" "$HERE/hermes-scripts/autopost-precheck.sh" > "$HERMES_HOME/scripts/autopost-precheck.sh"
 chmod 755 "$HERMES_HOME/scripts/autopost-precheck.sh"
 
+# Adapter (post-article.ts): bundled copy -> $HERMES_HOME/autopost/adapter, deps installed there.
+ADAPTER_DEST="$HERMES_HOME/autopost/adapter"
+mkdir -p "$ADAPTER_DEST"
+cp "$HERE/adapter/post-article.ts" "$HERE/adapter/package.json" "$ADAPTER_DEST/"
+[ -f "$HERE/adapter/package-lock.json" ] && cp "$HERE/adapter/package-lock.json" "$ADAPTER_DEST/"
+if [ ! -x "$ADAPTER_DEST/node_modules/.bin/tsx" ]; then
+  command -v npm >/dev/null || { echo "npm not found; run 'npm install' in $ADAPTER_DEST yourself"; exit 1; }
+  ( cd "$ADAPTER_DEST" && npm install --no-audit --no-fund --silent ) || { echo "npm install failed in $ADAPTER_DEST"; exit 1; }
+fi
+echo "adapter ready: $ADAPTER_DEST"
+
 # sites.json: your own file > config/sites.json > example (only if none installed yet)
 if [ -z "$SITES_FILE" ]; then
   [ -f "$HERE/config/sites.json" ] && SITES_FILE="$HERE/config/sites.json"
@@ -59,10 +70,10 @@ if [ -n "$SITES_FILE" ]; then
   [ -f "$SITES_FILE" ] || { echo "sites file not found: $SITES_FILE"; exit 1; }
   "$NODE" -e 'const a=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));if(!Array.isArray(a)||!a.length)process.exit(1)' "$SITES_FILE" \
     || { echo "sites file must be a non-empty JSON array: $SITES_FILE"; exit 1; }
-  cp "$SITES_FILE" "$HERMES_HOME/autopost/sites.json"
+  sed "s|__ADAPTER_DIR__|$ADAPTER_DEST|g" "$SITES_FILE" > "$HERMES_HOME/autopost/sites.json"
   echo "installed sites.json from $SITES_FILE"
 elif [ ! -e "$HERMES_HOME/autopost/sites.json" ]; then
-  cp "$HERE/config/sites.example.json" "$HERMES_HOME/autopost/sites.json"
+  sed "s|__ADAPTER_DIR__|$ADAPTER_DEST|g" "$HERE/config/sites.example.json" > "$HERMES_HOME/autopost/sites.json"
   echo "created $HERMES_HOME/autopost/sites.json from example (edit it, or put your own in config/sites.json)"
 fi
 cp "$HERE/config/cron-prompt.txt" "$HERMES_HOME/autopost/cron-prompt.txt"

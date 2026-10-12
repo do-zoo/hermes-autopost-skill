@@ -19,6 +19,7 @@ Pembagian tugas: Hermes hanya **memilih topik dan menulis**. Semua yang berefek 
 | `skill/autopost-article/` | Skill (SKILL.md, `scripts/autopost.mjs`, `references/`) |
 | `hermes-scripts/autopost-precheck.sh` | Pre-check cron, dipasang ke `~/.hermes/scripts/` |
 | `config/sites.example.json`, `config/cron-prompt.txt` | Contoh konfigurasi dan prompt cron |
+| `adapter/` | Salinan `post-article.ts` + `package.json` (marked, tsx); disalin ke `$HERMES_HOME/autopost/adapter` dan `npm install` otomatis |
 | `install.sh` | Pasang ke profile; baca `config/install.conf` (git-ignored) |
 | `config/install.conf.example` | Template pengaturan lokal (profile, token, jadwal) |
 | `dev/` | Mock API + tes integrasi terhadap `post-article.ts` asli |
@@ -32,7 +33,7 @@ Pembagian tugas: Hermes hanya **memilih topik dan menulis**. Semua yang berefek 
    ```bash
    hermes profile create autopost                         # sekali saja, kalau belum ada
    cp config/install.conf.example config/install.conf     # PROFILE, INGET_HERMES_TOKEN, jadwal cron
-   cp config/sites.example.json config/sites.json         # apiUrl, adapterDir, niche, bilingual, dll.
+   cp config/sites.example.json config/sites.json         # apiUrl, niche, bilingual, dll. (`adapterDir` biarkan `__ADAPTER_DIR__` untuk memakai adapter bawaan paket)
    ./install.sh                                           # tambah --force untuk menimpa, --cron untuk sekalian membuat job
    ```
    `install.sh` membaca `config/install.conf` (atau `--config FILE`); flag CLI menimpa isinya. Token ditulis langsung ke `$HERMES_HOME/.env` (chmod 600), tidak lewat argumen perintah dan tidak dicetak. `config/sites.json` disalin ke `$HERMES_HOME/autopost/sites.json`; bila tidak ada dan belum terpasang, contoh yang dipakai.
@@ -75,7 +76,7 @@ Pembagian tugas: Hermes hanya **memilih topik dan menulis**. Semua yang berefek 
 | Field | Default | Keterangan |
 |---|---|---|
 | `id`, `apiUrl` | wajib | Backend API (`INGET_API_URL`) |
-| `adapterDir` | wajib | Folder `scripts/post-article` |
+| `adapterDir` | wajib | `__ADAPTER_DIR__` = adapter bawaan paket (diganti `install.sh`); atau path absolut ke folder `scripts/post-article` milikmu |
 | `adapterCommand` | `["npx","tsx","post-article.ts"]` | Disarankan `["./node_modules/.bin/tsx","post-article.ts"]` |
 | `apiKeyEnv` | `INGET_HERMES_TOKEN` | Nama env var token. Site tambahan: tambahkan nama var ke `terminal.env_passthrough` |
 | `niche`, `audience`, `tone` | | Konteks penulisan; bedakan antar-site |
@@ -111,9 +112,10 @@ Gerbang kualitas menolak: H1/H5/H6, tabel, HTML inline, gambar, tautan (bila `re
 ## Tes
 
 ```bash
-ADAPTER_DIR=/opt/inget-gue/scripts/post-article dev/test.sh
+(cd adapter && npm install) && dev/test.sh
+# atau terhadap adapter lain: ADAPTER_DIR=/path/ke/scripts/post-article dev/test.sh
 ```
-Menjalankan `autopost.mjs` terhadap `post-article.ts` asli dan mock API: precheck, dedupe/kategori, gerbang, publish bilingual, 500 → deferred → kirim ulang, "exists", token salah, dan dua `next` paralel. Status terakhir: 29/29 lulus.
+Menjalankan `autopost.mjs` terhadap `post-article.ts` asli dan mock API: precheck, dedupe/kategori, gerbang, publish bilingual, 500 → deferred → kirim ulang, "exists", token salah, dan dua `next` paralel. Status terakhir (v1.2, adapter bawaan paket): 29/29 lulus.
 
 ## Belum terverifikasi (tidak bisa diuji tanpa Hermes + model sungguhan)
 

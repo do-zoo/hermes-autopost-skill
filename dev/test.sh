@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Integration test: autopost.mjs + the REAL post-article.ts + mock API.
-# usage: ADAPTER_DIR=/path/to/scripts/post-article dev/test.sh
+# usage: (cd adapter && npm install) && dev/test.sh      # or ADAPTER_DIR=/path/to/scripts/post-article dev/test.sh
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$HERE/.."
 AP="node $ROOT/skill/autopost-article/scripts/autopost.mjs"
-: "${ADAPTER_DIR:?set ADAPTER_DIR}"
+: "${ADAPTER_DIR:=$ROOT/adapter}"  # default: bundled adapter (run npm install there first)
 W="$(mktemp -d)"; trap 'kill $MOCK 2>/dev/null; rm -rf "$W"' EXIT
 export AUTOPOST_HOME="$W/home" AUTOPOST_SITES="$W/sites.json" INGET_TEST_TOKEN=secret-test
 mkdir -p "$AUTOPOST_HOME"

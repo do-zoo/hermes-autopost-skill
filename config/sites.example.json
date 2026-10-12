@@ -3,7 +3,7 @@
     "id": "inget-gue",
     "apiUrl": "http://localhost:3002",
     "apiKeyEnv": "INGET_HERMES_TOKEN",
-    "adapterDir": "/opt/inget-gue/scripts/post-article",
+    "adapterDir": "__ADAPTER_DIR__",
     "adapterCommand": ["./node_modules/.bin/tsx", "post-article.ts"],
     "niche": "produksi video dan konten kreator",
     "audience": "kreator konten pemula-menengah di Indonesia",
