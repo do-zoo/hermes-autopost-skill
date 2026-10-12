@@ -1,0 +1,8 @@
+{
+  "name": "inget-gue-post-article",
+  "private": true,
+  "type": "module",
+  "description": "Salinan adapter post-article.ts milik Inget Gue (jangan diubah tanpa sengaja; sumber kebenaran ada di repo Inget Gue).",
+  "dependencies": { "marked": "^12.0.2" },
+  "devDependencies": { "tsx": "^4.19.0" }
+}
