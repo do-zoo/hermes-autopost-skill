@@ -1,0 +1,5 @@
+# konfigurasi & rahasia lokal
+config/install.conf
+config/sites.json
+.env
+*.local

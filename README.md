@@ -19,19 +19,36 @@ Pembagian tugas: Hermes hanya **memilih topik dan menulis**. Semua yang berefek 
 | `skill/autopost-article/` | Skill (SKILL.md, `scripts/autopost.mjs`, `references/`) |
 | `hermes-scripts/autopost-precheck.sh` | Pre-check cron, dipasang ke `~/.hermes/scripts/` |
 | `config/sites.example.json`, `config/cron-prompt.txt` | Contoh konfigurasi dan prompt cron |
-| `install.sh` | Pasang semuanya ke `~/.hermes` |
+| `install.sh` | Pasang ke profile; baca `config/install.conf` (git-ignored) |
+| `config/install.conf.example` | Template pengaturan lokal (profile, token, jadwal) |
 | `dev/` | Mock API + tes integrasi terhadap `post-article.ts` asli |
 
 ## Setup di VPS
 
 1. **Pasang Hermes Agent** (ikuti dokumen resmi), pilih provider/model API-mu, dan jalankan `hermes` sekali untuk memastikan jalan.
 2. **Token Inget Gue**: buat user `hermes` (role ContentBot), token di *Account → API Tokens*, scope minimal `posts:read` + `posts:create`.
-3. **Pasang skill**:
+3. **Pasang skill** ke profile khusus (disarankan; profile = `HERMES_HOME` terpisah, `~/.hermes/profiles/<profile>/`).
+   Semua pengaturan lokal ada di file sendiri yang **di-ignore git** (`.gitignore` sudah disertakan):
    ```bash
-   ./install.sh            # gunakan --force untuk menimpa versi terpasang
-   hermes config set INGET_HERMES_TOKEN igt_xxx
-   nano ~/.hermes/autopost/sites.json    # apiUrl, adapterDir, niche, bilingual, dll.
+   hermes profile create autopost                         # sekali saja, kalau belum ada
+   cp config/install.conf.example config/install.conf     # PROFILE, INGET_HERMES_TOKEN, jadwal cron
+   cp config/sites.example.json config/sites.json         # apiUrl, adapterDir, niche, bilingual, dll.
+   ./install.sh                                           # tambah --force untuk menimpa, --cron untuk sekalian membuat job
    ```
+   `install.sh` membaca `config/install.conf` (atau `--config FILE`); flag CLI menimpa isinya. Token ditulis langsung ke `$HERMES_HOME/.env` (chmod 600), tidak lewat argumen perintah dan tidak dicetak. `config/sites.json` disalin ke `$HERMES_HOME/autopost/sites.json`; bila tidak ada dan belum terpasang, contoh yang dipakai.
+   Tanpa `--profile`, dipasang ke `~/.hermes` (profile default). Di bawah, `~/.hermes` berarti `$HERMES_HOME` profile-mu.
+   `install.sh` menanam path `HERMES_HOME` absolut ke script precheck (env cron disanitasi) dan **menyalin** script, bukan symlink (path di luar `scripts/` ditolak Hermes). `autopost.mjs` menurunkan `HERMES_HOME` dari lokasinya sendiri bila env tidak diwariskan.
+
+   **Konfigurasi profile yang disarankan** (`hermes -p autopost config edit`; semua per-profile):
+   ```yaml
+   memory: { memory_enabled: false, user_profile_enabled: false }   # planner = file JSON, bukan memory
+   skills: { write_approval: true }          # agent tidak boleh menulis ulang skill-nya sendiri
+   terminal: { cwd: /home/<user>/.hermes/profiles/autopost }        # path absolut; kosong = $HOME
+   cron: { require_restart_safe_scope: true }
+   approvals:
+     deny: ["*INGET_HERMES_TOKEN*", "printenv*", "*cat *.env*"]     # dicek sebelum yolo
+   ```
+   Pin model cron (`cron.model` atau `--pin`) agar tidak ikut berubah saat model utama diganti. Matikan bawaan skill yang tak dipakai: `hermes -p autopost skills opt-out --remove`.
 4. **Toolset** (`hermes tools`): untuk platform `cron` aktifkan hanya `terminal`, `file`, `skills`. Matikan `web`, `browser`, dan lainnya kalau tidak dibutuhkan (permukaan serangan lebih kecil; `research:false` memang melarang tautan).
 5. **Tes manual** sebelum dijadwalkan:
    ```bash
@@ -42,12 +59,15 @@ Pembagian tugas: Hermes hanya **memilih topik dan menulis**. Semua yang berefek 
    `--dry-run` menulis `~/.hermes/autopost/out/<site>/<item>.json` (format yang dibaca `post-article.ts`), tidak mengirim, item tetap pending.
 6. **Jadwalkan**:
    ```bash
-   hermes cron create "every 1h" "$(cat ~/.hermes/autopost/cron-prompt.txt)" \
-     --script ~/.hermes/scripts/autopost-precheck.sh \
+   hermes -p autopost cron create "every 1h" "$(cat ~/.hermes/profiles/autopost/autopost/cron-prompt.txt)" \
+     --script autopost-precheck.sh \
      --skill autopost-article --name autopost --deliver local
-   hermes gateway install && hermes gateway start
    loginctl enable-linger $USER      # supaya tetap jalan setelah logout
+   hermes gateway install && hermes gateway start     # dari profile DEFAULT
+   hermes gateway status             # baris "Serves:" harus memuat profile autopost
+   hermes -p autopost cron status    # cek heartbeat tick
    ```
+   Profile bernama tidak punya gateway sendiri (exit 78); gateway host milik profile default melayani semua profile aktif dan men-tick cron mereka. Bila job ter-kill di tengah kirim, kasus "already exists" yang ambigu (lihat bawah) jadi lebih mungkin, sebab itu `require_restart_safe_scope` dan linger penting.
    Interval 1 jam sengaja dipilih: jadwal sebenarnya ada di `scheduledFor` tiap item (`cadenceHours`, default 24), sehingga zona waktu cron tidak berpengaruh, dan precheck memastikan jam-jam kosong tidak memanggil LLM.
 
 ## Field `sites.json`
@@ -84,7 +104,8 @@ Gerbang kualitas menolak: H1/H5/H6, tabel, HTML inline, gambar, tautan (bila `re
 
 - Token tidak pernah dicetak; proses anak adapter hanya menerima `PATH`, `HOME`, `INGET_API_URL`, `INGET_API_TOKEN`.
 - Hanya membuat draft; scope token minimal; kategori tidak pernah dibuat otomatis.
-- `approvals.cron_mode` bawaan Hermes `deny`: perintah di luar yang diizinkan akan diblokir saat cron. Izinkan pola `node ~/.hermes/skills/autopost-article/scripts/autopost.mjs *` bila perintah itu diblokir (lihat `hermes config` untuk format allowlist di versimu).
+- `approvals.cron_mode` bawaan Hermes `deny` hanya berlaku untuk perintah berpola berbahaya (`bash -c`, `node -c`, heredoc, `curl | sh`). SKILL.md sudah mengarahkan agent memakai `write_file` dan `node ${HERMES_SKILL_DIR}/scripts/autopost.mjs ...` langsung. Bila perintah itu tetap diblokir, tambahkan polanya ke `command_allowlist`. Ini kebijakan, bukan sandbox: profile bukan batas keamanan, jadi token tetap scope minimal.
+- Jangan jalankan dua proses agent pada satu profile.
 - Tinjau draft terutama klaim faktual; prompt melarang mengarang angka/kutipan, tapi itu mengurangi, bukan menghilangkan, halusinasi.
 
 ## Tes
@@ -96,10 +117,12 @@ Menjalankan `autopost.mjs` terhadap `post-article.ts` asli dan mock API: prechec
 
 ## Belum terverifikasi (tidak bisa diuji tanpa Hermes + model sungguhan)
 
-1. Pemuatan skill dan pemanggilan `scripts/autopost.mjs` lewat `${HERMES_SKILL_DIR}` oleh agent.
-2. Perilaku `--script` + `{"wakeAgent": false}` pada versi Hermes-mu, dan flag `hermes cron create` (cek `hermes cron create --help`).
-3. Gateway berjalan tanpa platform pesan (cron butuh daemon gateway).
-4. Format `terminal.env_passthrough` untuk token site tambahan.
+Terverifikasi lewat dokumentasi (belum dijalankan): `${HERMES_SKILL_DIR}`, `required_environment_variables` (auto-passthrough, `blocked_config` tanpa panggilan LLM), mekanisme `{"wakeAgent": false}`, format `terminal.env_passthrough`, perilaku `cron_mode`.
+
+1. Apakah `cron create` menerima `--script` untuk job LLM (di dokumen hanya terlihat pada contoh `--no-agent`); cek `hermes cron create --help`.
+2. Gateway host berjalan dan men-tick profile tanpa platform pesan satu pun.
+3. `HERMES_HOME` ter-export ke child terminal (sudah ada fallback dari lokasi script).
+4. Bagaimana output precheck (teks "Sites needing work") disuntikkan ke prompt agent.
 5. Seberapa patuh model pilihanmu pada format front matter dan jumlah kata; jalankan dry-run beberapa kali dulu.
 6. Dokumentasi tidak menyebut zona waktu cron; desain ini tidak bergantung padanya.
 

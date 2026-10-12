@@ -1,0 +1,16 @@
+# Salin ke config/install.conf (di-ignore git), lalu isi. File ini di-source oleh install.sh (sintaks shell).
+# Nilai di sini bisa ditimpa flag CLI: ./install.sh --profile X --force
+
+# Profile Hermes tujuan. Kosong = pakai $HERMES_HOME atau ~/.hermes (profile default).
+PROFILE="autopost"
+
+# Token Inget Gue (scope posts:read + posts:create). Ditulis ke $HERMES_HOME/.env (chmod 600), tidak pernah dicetak.
+# Kosongkan bila token sudah ada di .env.
+INGET_HERMES_TOKEN=""
+
+# Opsional: file sites.json milikmu. Default: config/sites.json bila ada, kalau tidak config/sites.example.json.
+# SITES_FILE="config/sites.json"
+
+# Opsional: buat cron job otomatis bila dijalankan dengan --cron.
+CRON_SCHEDULE="every 1h"
+CRON_NAME="autopost"

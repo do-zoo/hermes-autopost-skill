@@ -4,4 +4,5 @@ Reply only with one line per event:
 ✅ <site>: <title> (draft, post <id>)
 📝 <site>: +<n> topics planned
 ⚠️ <site>: <what went wrong, one sentence>
+If any site returned result "blocked", start the reply with the line [CRON_FAILURE] and then the ⚠️ line.
 If nothing was done, reply with exactly: [SILENT]

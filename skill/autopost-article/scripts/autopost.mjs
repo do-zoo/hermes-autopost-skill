@@ -12,6 +12,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const HOUR = 3600_000;
 const STALE_WRITING_MS = 30 * 60_000;
@@ -21,7 +22,16 @@ const HTTP_TIMEOUT_MS = 30_000;
 
 // ---------------------------------------------------------------- paths / config
 
-const HERMES_HOME = process.env.HERMES_HOME || join(homedir(), ".hermes");
+// Profile-safe: cron/terminal children may not inherit HERMES_HOME, so fall back to the location of this
+// script ($HERMES_HOME/skills/<name>/scripts/autopost.mjs) before the default ~/.hermes.
+function resolveHermesHome() {
+  if (process.env.HERMES_HOME) return process.env.HERMES_HOME;
+  const here = dirname(fileURLToPath(import.meta.url)).split(/[\\/]/);
+  const i = here.lastIndexOf("skills");
+  if (i > 0) return here.slice(0, i).join("/") || "/";
+  return join(homedir(), ".hermes");
+}
+const HERMES_HOME = resolveHermesHome();
 const HOME_DIR = process.env.AUTOPOST_HOME || join(HERMES_HOME, "autopost");
 const SITES_FILE = process.env.AUTOPOST_SITES || join(HOME_DIR, "sites.json");
 
