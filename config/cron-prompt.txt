@@ -1,0 +1,7 @@
+Run the autopost-article skill for the sites listed in the pre-check output above. For each listed site: top up topics if needs_topics > 0, then write and submit due articles (due > 0), following the skill exactly. Do not touch sites that are not listed.
+
+Reply only with one line per event:
+✅ <site>: <title> (draft, post <id>)
+📝 <site>: +<n> topics planned
+⚠️ <site>: <what went wrong, one sentence>
+If nothing was done, reply with exactly: [SILENT]
