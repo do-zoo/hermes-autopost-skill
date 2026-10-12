@@ -4,7 +4,7 @@
 # Profile Hermes tujuan. Kosong = pakai $HERMES_HOME atau ~/.hermes (profile default).
 PROFILE="autopost"
 
-# Token Inget Gue (scope posts:read + posts:create). Ditulis ke $HERMES_HOME/.env (chmod 600), tidak pernah dicetak.
+# Token Inget Gue (scope posts:read + posts:create; tambahkan media:create bila coverImage aktif). Ditulis ke $HERMES_HOME/.env (chmod 600), tidak pernah dicetak.
 # Kosongkan bila token sudah ada di .env.
 INGET_HERMES_TOKEN=""
 

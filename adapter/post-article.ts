@@ -8,7 +8,7 @@
  * Exit codes: 0 ok, 1 usage/config, 2 auth, 3 validation/conflict, 4 network/server (retried).
  */
 import { readFile } from 'node:fs/promises';
-import { basename, extname } from 'node:path';
+import { basename, dirname, extname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { marked } from 'marked';
 
@@ -174,6 +174,40 @@ export async function run(
   } catch (e) {
     throw new CliError(EXIT.USAGE, `Cannot read ${opts.file}: ${(e as Error).message}`);
   }
+  const upload = async (path: string): Promise<string> => {
+    const type = IMAGE_TYPES[extname(path).toLowerCase()];
+    if (!type) throw new CliError(EXIT.USAGE, `Unsupported image type: ${path}`);
+    const form = new FormData();
+    form.append(
+      'file',
+      new Blob([new Uint8Array(await deps.readFile(path))], { type }),
+      basename(path)
+    );
+    return (await call('POST', '/api/media/upload', form)).data.url;
+  };
+
+  // Local image paths in the markdown (relative to the article file) are uploaded and replaced by their URL.
+  const uploaded = new Map<string, string>();
+  for (const key of MARKDOWN_FIELDS) {
+    const md = article[key];
+    if (typeof md !== 'string') continue;
+    const re = /!\[([^\]]*)\]\(([^)\s]+)\)/g;
+    let out = '';
+    let last = 0;
+    for (const m of md.matchAll(re)) {
+      const src = m[2]!;
+      out += md.slice(last, m.index);
+      last = m.index + m[0].length;
+      if (/^(https?:|data:)/i.test(src)) {
+        out += m[0];
+        continue;
+      }
+      const file = resolve(dirname(opts.file), src);
+      if (!uploaded.has(file)) uploaded.set(file, await upload(file));
+      out += `![${m[1]}](${uploaded.get(file)})`;
+    }
+    article[key] = out + md.slice(last);
+  }
   const body = buildBody(article);
 
   const wanted = (article.category ?? article.categoryId) as string | undefined;
@@ -182,15 +216,7 @@ export async function run(
   body.categoryId = pickCategory(Array.isArray(cats) ? cats : cats.data, wanted).id;
 
   if (opts.cover) {
-    const type = IMAGE_TYPES[extname(opts.cover).toLowerCase()];
-    if (!type) throw new CliError(EXIT.USAGE, `Unsupported cover type: ${opts.cover}`);
-    const form = new FormData();
-    form.append(
-      'file',
-      new Blob([new Uint8Array(await deps.readFile(opts.cover))], { type }),
-      basename(opts.cover)
-    );
-    body.coverImageUrl = (await call('POST', '/api/media/upload', form)).data.url;
+    body.coverImageUrl = /^https?:\/\//i.test(opts.cover) ? opts.cover : await upload(opts.cover);
   }
 
   const createBody = { ...body };

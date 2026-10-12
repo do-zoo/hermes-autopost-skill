@@ -27,7 +27,7 @@ Pembagian tugas: Hermes hanya **memilih topik dan menulis**. Semua yang berefek 
 ## Setup di VPS
 
 1. **Pasang Hermes Agent** (ikuti dokumen resmi), pilih provider/model API-mu, dan jalankan `hermes` sekali untuk memastikan jalan.
-2. **Token Inget Gue**: buat user `hermes` (role ContentBot), token di *Account → API Tokens*, scope minimal `posts:read` + `posts:create`.
+2. **Token Inget Gue**: buat user `hermes` (role ContentBot), token di *Account → API Tokens*, scope minimal `posts:read` + `posts:create` (+ `media:create` bila `coverImage` bukan `off`).
 3. **Pasang skill** ke profile khusus (disarankan; profile = `HERMES_HOME` terpisah, `~/.hermes/profiles/<profile>/`).
    Semua pengaturan lokal ada di file sendiri yang **di-ignore git** (`.gitignore` sudah disertakan):
    ```bash
@@ -86,6 +86,9 @@ Pembagian tugas: Hermes hanya **memilih topik dan menulis**. Semua yang berefek 
 | `cadenceHours` | 24 | Jarak antar artikel terjadwal |
 | `planBacklogTarget` / `planRefillBelow` | 14 / ½ target | Antrean diisi ulang bila di bawah `refillBelow`, sampai `target` |
 | `minWords`, `maxAttempts` | 600, 3 | Gerbang panjang (EN × 0.7); batas revisi |
+| `coverImage` | `off` | `off` / `optional` / `required`. Agen membuat satu gambar sampul dengan image tool, disimpan lewat `autopost.mjs cover`, dikirim ke adapter dengan `--cover`. `optional`: kegagalan upload tidak menahan artikel (diposting tanpa cover + peringatan). `required`: tanpa cover valid → `revise` |
+| `coverStyle` | kosong | Petunjuk gaya gambar untuk prompt (tanpa teks/logo/wajah nyata sudah diwajibkan skill) |
+| `maxCoverBytes` | 5242880 | Batas ukuran file cover |
 
 State ada di `~/.hermes/autopost/` (`plans/`, `drafts/`, `out/`), JSON biasa, aman diperiksa atau disunting saat tidak ada run berjalan. Planner di sisi web belum diimplementasikan; semua site memakai planner lokal ini.
 
@@ -99,7 +102,7 @@ State ada di `~/.hermes/autopost/` (`plans/`, `drafts/`, `out/`), JSON biasa, am
 | 3 "already exists" | exit 30 `failed` | Perlu cek manusia (bisa slug bentrok atau kiriman sebelumnya yang ternyata masuk) |
 | 3 lainnya, atau gagal gerbang | exit 10 `revise` | Agent memperbaiki file draft yang sama; `maxAttempts` lalu `failed` |
 
-Gerbang kualitas menolak: H1/H5/H6, tabel, HTML inline, gambar, tautan (bila `research:false`), placeholder, meta-komentar AI, `<think>`, kurang dari 2 H2, terlalu pendek. Alasannya: backend diam-diam membuang tag di luar `p br h2 h3 h4 strong em u s blockquote ul ol li a img hr code pre`.
+Gerbang kualitas menolak: H1/H5/H6, tabel, HTML inline, gambar di badan artikel (cover dikirim terpisah), tautan (bila `research:false`), placeholder, meta-komentar AI, `<think>`, kurang dari 2 H2, terlalu pendek. Alasannya: backend diam-diam membuang tag di luar `p br h2 h3 h4 strong em u s blockquote ul ol li a img hr code pre`.
 
 ## Keamanan
 
@@ -129,3 +132,14 @@ Terverifikasi lewat dokumentasi (belum dijalankan): `${HERMES_SKILL_DIR}`, `requ
 6. Dokumentasi tidak menyebut zona waktu cron; desain ini tidak bergantung padanya.
 
 Kelemahan adapter yang masih ada (di luar paket ini): `fetch` tanpa timeout, "already exists" setelah retry POST ambigu, dedupe hanya 100 judul pertama.
+
+
+## Gambar sampul (v1.4)
+
+Aktifkan per site dengan `"coverImage": "optional"` (disarankan) atau `"required"`.
+
+1. Token harus punya scope **`media:create`** (selain `posts:read` + `posts:create`). Tanpa itu unggah ditolak 403; pada mode `optional` artikel tetap diposting tanpa cover dengan peringatan, pada `required` item akan terus gagal.
+2. Aktifkan toolset **`image_gen`** untuk platform cron (`hermes -p <profile> tools`). Jangan aktifkan `web`.
+3. Alur: `next` memberi `item.cover` → agen membuat gambar → `cover --site S --item ID --file <file>` memeriksa isi file (magic bytes png/jpg/webp/gif, bukan sekadar ekstensi, jadi file rahasia yang diberi nama `.png` ditolak), ukuran, lalu menyalinnya ke folder draf → `submit` menyertakan `--cover`.
+4. URL tidak pernah dipakai sebagai cover (adapter menerimanya, skill sengaja tidak mengizinkan) dan gambar di badan artikel tetap ditolak.
+5. Belum terverifikasi tanpa Hermes sungguhan: bagaimana tool `image_gen` mengembalikan hasilnya (path file atau hanya URL), dan apakah agen bisa mengambil file itu dari sandbox tool ke folder kerja. Cek pada dry-run pertama.

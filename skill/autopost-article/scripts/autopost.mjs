@@ -9,9 +9,10 @@
 import { execFile } from "node:child_process";
 import {
   existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync, statSync, readdirSync,
+  copyFileSync, openSync, readSync, closeSync, realpathSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HOUR = 3600_000;
@@ -51,6 +52,9 @@ function loadSites() {
     if (!s.id || !/^[a-z0-9][a-z0-9_-]*$/i.test(s.id)) throw new Fail(`invalid site id: ${s.id}`);
     if (!s.apiUrl) throw new Fail(`site ${s.id}: apiUrl missing`);
     if (!s.adapterDir) throw new Fail(`site ${s.id}: adapterDir missing`);
+    if (s.coverImage != null && !["off", "optional", "required"].includes(s.coverImage)) {
+      throw new Fail(`site ${s.id}: coverImage must be off | optional | required`);
+    }
     const target = s.planBacklogTarget ?? 14;
     return {
       apiKeyEnv: "INGET_HERMES_TOKEN",
@@ -58,6 +62,7 @@ function loadSites() {
       niche: "", audience: "", tone: "informative, practical",
       bilingual: false, research: false,
       postsPerRun: 1, cadenceHours: 24, minWords: 600, maxAttempts: 3,
+      coverImage: "off", maxCoverBytes: 5 * 1024 * 1024, coverStyle: "",
       ...s,
       apiUrl: String(s.apiUrl).replace(/\/+$/, ""),
       planBacklogTarget: target,
@@ -249,7 +254,7 @@ function qualityProblems(v, minWords, research) {
   if (/^#\s/m.test(prose) || /^#{5,6}\s/m.test(prose)) problems.push("uses H1/H5/H6 (only H2-H4 are supported)");
   if (/^\s*\|.*\|\s*$/m.test(prose)) problems.push("uses a markdown table (unsupported)");
   if (/<\/?[a-z][^>]*>/i.test(prose)) problems.push("contains inline HTML");
-  if (/!\[[^\]]*\]\(/.test(prose)) problems.push("contains an image");
+  if (/!\[[^\]]*\]\(/.test(prose)) problems.push("contains an image (images in the body are not supported; use the cover command)");
   if (!research && /\[[^\]]+\]\([^)]*\)/.test(prose)) {
     problems.push("contains a link (research is off for this site, so any URL would be invented)");
   }
@@ -259,15 +264,70 @@ function qualityProblems(v, minWords, research) {
   return problems;
 }
 
+// ---------------------------------------------------------------- cover image
+
+const COVER_EXTS = [".png", ".jpg", ".jpeg", ".webp", ".gif"];
+const coverBase = (siteId, itemId) => join(draftDir(siteId), `${itemId}.cover`);
+
+/** Detects the real image type from magic bytes, so a renamed text/secret file can never pass as a cover. */
+function sniffImage(file) {
+  const fd = openSync(file, "r");
+  try {
+    const b = Buffer.alloc(12);
+    readSync(fd, b, 0, 12, 0);
+    if (b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return ".png";
+    if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return ".jpg";
+    if (b.subarray(0, 4).toString("latin1") === "RIFF" && b.subarray(8, 12).toString("latin1") === "WEBP") return ".webp";
+    if (/^GIF8[79]a$/.test(b.subarray(0, 6).toString("latin1"))) return ".gif";
+    return null;
+  } finally { closeSync(fd); }
+}
+
+/** Returns {path, problem}. path is set only for a valid cover already stored in the drafts folder. */
+function findCover(site, itemId) {
+  const base = coverBase(site.id, itemId);
+  const hits = COVER_EXTS.map((e) => base + e).filter((f) => existsSync(f));
+  if (hits.length === 0) return { path: null, problem: null };
+  if (hits.length > 1) return { path: null, problem: `several cover files found for this item (${hits.join(", ")}); keep one` };
+  const f = hits[0];
+  const size = statSync(f).size;
+  if (size === 0) return { path: null, problem: "cover image is empty" };
+  if (size > site.maxCoverBytes) return { path: null, problem: `cover image too large (${Math.round(size / 1024)} KB, max ${Math.round(site.maxCoverBytes / 1024)} KB)` };
+  const real = sniffImage(f);
+  if (!real) return { path: null, problem: "cover file is not a png/jpg/webp/gif image" };
+  return { path: f, problem: null };
+}
+
+async function cmdCover(args) {
+  const site = oneSite(args);
+  if (site.coverImage === "off") throw new Fail(`site ${site.id} has coverImage off`);
+  if (!args.item || !args.file || args.file === true) throw new Fail("--item and --file are required");
+  const plan = readPlan(site.id);
+  if (!plan.items.some((i) => i.id === args.item)) throw new Fail(`unknown item: ${args.item}`);
+  if (!existsSync(args.file)) throw new Fail(`image file not found: ${args.file}`);
+  const src = realpathSync(args.file);
+  const st = statSync(src);
+  if (!st.isFile()) throw new Fail("not a regular file");
+  if (st.size === 0 || st.size > site.maxCoverBytes) throw new Fail(`image size must be 1 byte to ${site.maxCoverBytes} bytes (got ${st.size})`);
+  const ext = sniffImage(src);
+  if (!ext) throw new Fail("file is not a png/jpg/webp/gif image");
+  mkdirSync(draftDir(site.id), { recursive: true });
+  for (const e of COVER_EXTS) rmSync(coverBase(site.id, args.item) + e, { force: true });
+  const dest = coverBase(site.id, args.item) + ext;
+  copyFileSync(src, dest);
+  out({ result: "cover-saved", path: dest, bytes: st.size, type: ext.slice(1) });
+  return 0;
+}
+
 // ---------------------------------------------------------------- adapter call
 
 const EXISTS_RE = /already exists \(id ([^,)]+), slug ([^)]+)\)/;
 
-function runAdapter(site, file) {
+function runAdapter(site, file, cover) {
   const [cmd, ...cmdArgs] = site.adapterCommand;
   return new Promise((done) => {
     execFile(
-      cmd, [...cmdArgs, resolve(file)],
+      cmd, [...cmdArgs, resolve(file), ...(cover ? ["--cover", resolve(cover)] : [])],
       {
         cwd: site.adapterDir, timeout: ADAPTER_TIMEOUT_MS, maxBuffer: 1024 * 1024,
         // Minimal env: no other site's token and no model keys reach the child process.
@@ -392,6 +452,7 @@ function itemPayload(site, it) {
     id: it.id, topic: it.topic, angle: it.angle, keywords: it.keywords, category: it.category,
     attempts: it.attempts, lastError: it.lastError || undefined,
     drafts: { id: { path: idPath, exists: existsSync(idPath) }, ...(site.bilingual ? { en: { path: enPath, exists: existsSync(enPath) } } : {}) },
+    ...(site.coverImage !== "off" ? { cover: { mode: site.coverImage, exists: findCover(site, it.id).path !== null, save: `cover --site ${site.id} --item ${it.id} --file <generated image path>` } } : {}),
   };
 }
 
@@ -415,11 +476,11 @@ async function cmdNext(args) {
       file: "front matter + markdown body, written to each draft path",
       frontMatter: ["title (10-120 chars)", "excerpt (30-400 chars)", "meta_description (50-170 chars)"],
       allowedMarkdown: "## ### #### headings, paragraphs, **bold**, *italic*, lists, > quotes, `code`, fenced code, ---",
-      forbidden: ["H1 (# )", "H5/H6", "tables", "inline HTML", "images", site.research ? null : "links"].filter(Boolean),
+      forbidden: ["H1 (# )", "H5/H6", "tables", "inline HTML", "images in the body (a cover image is attached separately)", site.research ? null : "links"].filter(Boolean),
       minWords: site.minWords, minWordsEn: Math.floor(site.minWords * 0.7),
       language: "Indonesian for the main draft" + (site.bilingual ? "; the .en draft is a full English version (not a summary)" : ""),
     },
-    site: { niche: site.niche, audience: site.audience, tone: site.tone, bilingual: site.bilingual, research: site.research, postsPerRun: site.postsPerRun },
+    site: { niche: site.niche, audience: site.audience, tone: site.tone, bilingual: site.bilingual, research: site.research, postsPerRun: site.postsPerRun, coverImage: site.coverImage, coverStyle: site.coverStyle || undefined },
   });
 }
 
@@ -466,6 +527,13 @@ async function cmdSubmit(args) {
       } catch (e) { problems.push(`English draft: ${e.message}`); }
     }
   }
+  let cover = null;
+  if (site.coverImage !== "off") {
+    const c = findCover(site, item.id);
+    if (c.problem) problems.push(`cover: ${c.problem}`);
+    else if (c.path) cover = c.path;
+    else if (site.coverImage === "required") problems.push(`cover image required but missing; generate one and run: cover --site ${site.id} --item ${item.id} --file <path>`);
+  }
   if (problems.length) return reviseOrFail(site, item, problems, "gates");
 
   // ---- build adapter input
@@ -480,12 +548,19 @@ async function cmdSubmit(args) {
 
   if (args["dry-run"]) {
     await patchItem(site.id, item.id, (it) => { it.status = "pending"; });
-    out({ result: "dry-run", file: of, message: "gates passed; nothing sent; item stays pending" });
+    out({ result: "dry-run", file: of, cover: cover ?? null, message: "gates passed; nothing sent; item stays pending" });
     return 0;
   }
 
   // ---- send (no lock held)
-  const r = await runAdapter(site, of);
+  let r = await runAdapter(site, of, cover);
+  let coverSkipped = "";
+  // An optional cover must never block the article: if the upload is refused (missing media scope, bad image),
+  // retry once without it. A genuinely bad token fails the same way again and is then reported as blocked.
+  if (cover && site.coverImage === "optional" && r.kind === "exit" && (r.code === 1 || r.code === 2)) {
+    coverSkipped = trunc((r.stderr || r.stdout).trim() || `exit ${r.code}`);
+    r = await runAdapter(site, of, null);
+  }
 
   if (r.kind === "timeout") return defer(site, item, `adapter did not finish within ${ADAPTER_TIMEOUT_MS / 1000}s`);
   if (r.kind === "spawn") return block(site, item, `adapter cannot be started: ${r.message}`);
@@ -495,7 +570,12 @@ async function cmdSubmit(args) {
     let id = "unknown", status = "";
     try { const j = JSON.parse(last); id = String(j.id ?? "unknown"); status = j.status ?? ""; } catch { /* exit 0 means created */ }
     await patchItem(site.id, item.id, (it) => { it.status = "published"; it.remoteRef = id; it.lastError = ""; it.publishedAt = iso(Date.now()); });
-    out({ result: "published", postId: id, status, title: idV.title, message: "draft created in the backoffice" });
+    out({
+      result: "published", postId: id, status, title: idV.title,
+      cover: cover && !coverSkipped ? "attached" : "none",
+      ...(coverSkipped ? { warning: `posted WITHOUT cover: ${coverSkipped}. Check the token has media:create.` } : {}),
+      message: "draft created in the backoffice",
+    });
     return 0;
   }
 
@@ -565,6 +645,7 @@ const HELP = `autopost.mjs <command> [options]
   plan-add --site S --file plan.json
   next     --site S
   submit   --site S --item ID [--id-file F] [--en-file F] [--dry-run]
+  cover    --site S --item ID --file IMAGE   (sites with coverImage optional|required)
   status   [--site S]`;
 
 async function main() {
@@ -576,6 +657,7 @@ async function main() {
     case "plan-add": return cmdPlanAdd(args);
     case "next": return cmdNext(args);
     case "submit": return cmdSubmit(args);
+    case "cover": return cmdCover(args);
     case "status": return cmdStatus(args);
     default: console.error(HELP); return 1;
   }

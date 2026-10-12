@@ -12,7 +12,7 @@ mkdir -p "$AUTOPOST_HOME"
 cat > "$AUTOPOST_SITES" <<JSON
 [{"id":"t","apiUrl":"http://localhost:4010","apiKeyEnv":"INGET_TEST_TOKEN","adapterDir":"$ADAPTER_DIR",
   "adapterCommand":["./node_modules/.bin/tsx","post-article.ts"],"niche":"video","bilingual":true,
-  "minWords":100,"planBacklogTarget":6,"planRefillBelow":3,"cadenceHours":24}]
+  "minWords":100,"coverImage":"optional","planBacklogTarget":6,"planRefillBelow":3,"cadenceHours":24}]
 JSON
 echo ok > "$W/mode"
 node "$HERE/mock-api.mjs" "$W/posts.log" "$W/mode" > "$W/mock.out" 2>&1 & MOCK=$!
@@ -90,6 +90,49 @@ makedue
 ( $AP next --site t > "$W/n1.json" & $AP next --site t > "$W/n2.json" & wait )
 a=$(j 'item?.id' < "$W/n1.json"); b=$(j 'item?.id' < "$W/n2.json")
 if [ "$a" != "$b" ]; then PASS=$((PASS+1)); echo "  PASS distinct ($a / $b)"; else FAIL=$((FAIL+1)); echo "  FAIL same item claimed twice: $a"; fi
+
+addpending() { node -e "const f=process.argv[1];const n=+process.argv[2];const p=JSON.parse(require('fs').readFileSync(f));for(let i=0;i<n;i++)p.items.push({id:'x'+Date.now().toString(36)+i,topic:'Topik tambahan nomor '+i+' '+Math.random(),angle:'',keywords:[],category:'production-tips',status:'pending',attempts:0,lastError:'',remoteRef:'',scheduledFor:'2020-01-01T00:00:00.000Z'});require('fs').writeFileSync(f,JSON.stringify(p))" "$AUTOPOST_HOME/plans/t.json" "$1"; }
+addpending 5
+echo "11) cover image: optional, saved, validated, attached"
+mkdir -p "$W/img"
+node -e "require('fs').writeFileSync(process.argv[1],Buffer.concat([Buffer.from([0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a]),Buffer.alloc(200,1)]))" "$W/img/gen.png"
+echo "secret=abc" > "$W/img/fake.png"
+makedue; makedue
+o=$($AP next --site t); ID=$(j 'item.id' <<<"$o"); IDP=$(j 'item.drafts.id.path' <<<"$o"); ENP=$(j 'item.drafts.en.path' <<<"$o")
+chk "next advertises cover" optional "$(j 'item.cover.mode' <<<"$o")"
+node "$HERE/gen-draft.mjs" "$IDP" "Panduan memilih pencahayaan" id; node "$HERE/gen-draft.mjs" "$ENP" "Lighting guide" en
+$AP cover --site t --item "$ID" --file "$W/img/fake.png" >/dev/null 2>&1; chk "non-image rejected (magic bytes)" 1 $?
+$AP cover --site t --item "$ID" --file /etc/passwd >/dev/null 2>&1; chk "/etc/passwd rejected" 1 $?
+o=$($AP cover --site t --item "$ID" --file "$W/img/gen.png"); chk "cover saved" cover-saved "$(j 'result' <<<"$o")"
+o=$($AP submit --site t --item "$ID" --dry-run); has "dry-run reports cover" "cover.png" "$o"
+o=$($AP submit --site t --item "$ID"); chk "publish with cover exit 0" 0 $?; has "cover attached" '"cover": "attached"' "$o"
+chk "mock got cover url" "https://cdn.test/media/cover-1.png" "$(node -e "const l=require('fs').readFileSync('$W/posts.log','utf8').trim().split('\n');console.log(JSON.parse(l[l.length-1]).cover)")"
+
+echo "12) cover upload refused (no media scope) -> optional cover is skipped, article still posts"
+makedue; echo nomedia > "$W/mode"
+o=$($AP next --site t); ID=$(j 'item.id' <<<"$o"); IDP=$(j 'item.drafts.id.path' <<<"$o"); ENP=$(j 'item.drafts.en.path' <<<"$o")
+node "$HERE/gen-draft.mjs" "$IDP" "Memilih lensa untuk video" id; node "$HERE/gen-draft.mjs" "$ENP" "Choosing lenses for video" en
+$AP cover --site t --item "$ID" --file "$W/img/gen.png" >/dev/null
+o=$($AP submit --site t --item "$ID"); chk "exit 0 despite refused cover" 0 $?; has "warning present" "WITHOUT cover" "$o"; has "cover none" '"cover": "none"' "$o"
+echo ok > "$W/mode"
+
+echo "13) required cover missing -> revise; then OK"
+node -e "const f=process.argv[1];const a=JSON.parse(require('fs').readFileSync(f));a[0].coverImage='required';require('fs').writeFileSync(f,JSON.stringify(a))" "$AUTOPOST_SITES"
+makedue
+o=$($AP next --site t); ID=$(j 'item.id' <<<"$o"); IDP=$(j 'item.drafts.id.path' <<<"$o"); ENP=$(j 'item.drafts.en.path' <<<"$o")
+node "$HERE/gen-draft.mjs" "$IDP" "Rekaman audio yang bersih di lokasi" id; node "$HERE/gen-draft.mjs" "$ENP" "Clean location audio" en
+o=$($AP submit --site t --item "$ID"); chk "required cover missing -> exit 10" 10 $?; has "asks for cover" "cover image required" "$o"
+$AP cover --site t --item "$ID" --file "$W/img/gen.png" >/dev/null
+o=$($AP submit --site t --item "$ID"); chk "then publishes" 0 $?
+node -e "const f=process.argv[1];const a=JSON.parse(require('fs').readFileSync(f));a[0].coverImage='off';require('fs').writeFileSync(f,JSON.stringify(a))" "$AUTOPOST_SITES"
+$AP cover --site t --item x --file "$W/img/gen.png" >/dev/null 2>&1; chk "cover command refused when off" 1 $?
+
+echo "14) body images still rejected"
+makedue
+o=$($AP next --site t); ID=$(j 'item.id' <<<"$o"); IDP=$(j 'item.drafts.id.path' <<<"$o"); ENP=$(j 'item.drafts.en.path' <<<"$o")
+node "$HERE/gen-draft.mjs" "$IDP" "Topik gambar" id; node "$HERE/gen-draft.mjs" "$ENP" "Image topic" en
+printf '\n![x](http://evil.test/a.png)\n' >> "$IDP"
+o=$($AP submit --site t --item "$ID"); chk "body image -> exit 10" 10 $?; has "image flagged" "contains an image" "$o"
 
 echo "10) status"
 $AP status --site t | head -20

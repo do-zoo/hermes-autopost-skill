@@ -1,7 +1,7 @@
 ---
 name: autopost-article
 description: Plan topics, write articles and submit them as drafts to the user's own Next.js sites (Inget Gue backoffice) through a deterministic toolbox script. Use for scheduled autoposting runs or when asked to write/queue articles for a configured site.
-version: 1.1.0
+version: 1.2.0
 author: Edwar
 license: MIT
 platforms: [linux, macos]
@@ -35,6 +35,7 @@ All commands: `node ${HERMES_SKILL_DIR}/scripts/autopost.mjs <command>`
 | `context --site S` | Niche, allowed categories, existing titles, how many topics are needed |
 | `plan-add --site S --file F` | Validate (category, duplicates) and schedule proposed topics |
 | `next --site S` | Claim the next due item; returns draft paths and format rules |
+| `cover --site S --item ID --file IMG` | Validate a generated cover image and store it for this item (only when `item.cover` is present) |
 | `submit --site S --item ID` | Run quality gates, send to the site, update status |
 
 ## Ground Rules (tool use)
@@ -59,6 +60,8 @@ All commands: `node ${HERMES_SKILL_DIR}/scripts/autopost.mjs <command>`
      version to `drafts.en.path` (translation of the whole article, not a summary).
      If a draft already has `exists: true` (a retry after a network failure), do **not** rewrite it; just submit.
    - Format: see `references/article-format.md`. Front matter with `title`, `excerpt`, `meta_description`, then markdown.
+   - **Cover image** (only if `next` returned `item.cover`): generate one image with the image tool, then
+     `cover --site S --item ID --file <path of the generated file>`. See "Cover images" below.
    - `submit --site S --item ID`.
 4. **Handle the result** (exit code, with JSON on stdout):
 
@@ -71,6 +74,22 @@ All commands: `node ${HERMES_SKILL_DIR}/scripts/autopost.mjs <command>`
 | 30 | `failed` | Needs a human (gave up, or the post already exists). Move on to the next item. |
 
 5. **Report** in the exact format from the run prompt. If nothing was done, reply with exactly `[SILENT]`.
+
+## Cover images
+
+Only when `item.cover` exists in the `next` output (`mode` is `optional` or `required`).
+
+- Prompt: an illustration for the article topic, landscape 16:9, in `site.coverStyle` if given. **No text, letters, logos,
+  watermarks or recognisable real people.** Prefer abstract or illustrative over photorealistic, so it never looks like a
+  real client project.
+- Use the image tool's output file only. Never download images from the web and never use a URL from anywhere.
+- If the tool gives only a URL for its own generated image, fetch exactly that one file to a temp path, then run `cover`.
+- `cover` rejects non-images, empty or oversized files. Fix by generating again, at most twice.
+- `optional`: if you cannot produce a valid image after two tries, skip it and `submit` anyway; mention it in the report.
+- `required`: no valid cover means `submit` returns `revise`; if generation keeps failing, stop and report the problem.
+- A `published` result with a `warning` about the cover means the post is a draft **without** cover (the token likely lacks
+  `media:create`). Include it in the report as a ⚠️ line.
+- Never put images in the article body; the gate rejects them.
 
 ## Pitfalls
 

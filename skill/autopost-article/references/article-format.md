@@ -25,7 +25,7 @@ Isi...
 - Minimum words: `minWords` (main) and 70% of it (English). The `next` output states the numbers.
 - At least two `##` sections. Use only `##`, `###`, `####`.
 - Allowed: paragraphs, **bold**, *italic*, bullet/numbered lists, `> quotes`, `inline code`, fenced code, `---`.
-- Not allowed: `#` title in the body, tables, inline HTML, images, placeholders, AI self-reference, `<think>` blocks.
+- Not allowed: `#` title in the body, tables, inline HTML, images in the body (a cover image is attached separately with the `cover` command, if the site enables it), placeholders, AI self-reference, `<think>` blocks.
 - Links only when the site has `research: true`, and only to URLs you actually fetched.
 - English draft: same structure, complete (title, excerpt, meta_description, body). The backend rejects partial English.
 

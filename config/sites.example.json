@@ -4,7 +4,10 @@
     "apiUrl": "http://localhost:3002",
     "apiKeyEnv": "INGET_HERMES_TOKEN",
     "adapterDir": "__ADAPTER_DIR__",
-    "adapterCommand": ["./node_modules/.bin/tsx", "post-article.ts"],
+    "adapterCommand": [
+      "./node_modules/.bin/tsx",
+      "post-article.ts"
+    ],
     "niche": "produksi video dan konten kreator",
     "audience": "kreator konten pemula-menengah di Indonesia",
     "tone": "informatif, praktis, tidak bertele-tele",
@@ -15,6 +18,8 @@
     "planBacklogTarget": 14,
     "planRefillBelow": 7,
     "minWords": 600,
-    "maxAttempts": 3
+    "maxAttempts": 3,
+    "coverImage": "optional",
+    "coverStyle": "ilustrasi modern, palet hangat, komposisi sederhana; tanpa teks, logo, atau wajah orang nyata"
   }
 ]

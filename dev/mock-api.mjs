@@ -1,5 +1,5 @@
 // Minimal mock of the Inget Gue API (categories, posts list, create). Token: secret-test
-// usage: node mock-api.mjs <postlog> <modefile>   (modefile content: ok | 500 | exists)
+// usage: node mock-api.mjs <postlog> <modefile>   (modefile content: ok | 500 | exists | nomedia)
 import http from "node:http";
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 
@@ -37,6 +37,13 @@ http
         if (req.method === "GET" && url.pathname === "/api/posts") {
           return send(200, { success: true, data: { data: posts, meta: { totalPages: 1 } } });
         }
+        if (req.method === "POST" && url.pathname === "/api/media/upload") {
+          if (mode() === "nomedia") return send(403, { success: false, error: { message: "missing scope media:create" } });
+          if (!String(req.headers["content-type"]).startsWith("multipart/form-data")) {
+            return send(400, { success: false, error: { message: "multipart required" } });
+          }
+          return send(201, { success: true, data: { url: "https://cdn.test/media/cover-1.png" } });
+        }
         if (req.method === "POST" && url.pathname === "/api/posts") {
           const body = JSON.parse(raw);
           const m = mode();
@@ -71,11 +78,12 @@ http
               contentIdStart: body.contentId.slice(0, 30),
               categoryId: body.categoryId,
               status: body.status ?? "(unset)",
+              cover: body.coverImageUrl ?? null,
             }) + "\n",
           );
           return send(201, {
             success: true,
-            data: { id, status: "INACTIVE", slugId: body.slugId, slugEn: body.slugEn ?? null, coverImageUrl: null },
+            data: { id, status: "INACTIVE", slugId: body.slugId, slugEn: body.slugEn ?? null, coverImageUrl: body.coverImageUrl ?? null },
           });
         }
         return send(404, { success: false, error: { message: "not found" } });
